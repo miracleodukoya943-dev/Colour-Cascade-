@@ -1,0 +1,535 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Cascade — Crystal Match</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;700&family=Sora:wght@400;600&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --bg-deep:#0B0E14;
+    --bg-panel:#12161F;
+    --line:#232A38;
+    --ink:#EDEBFF;
+    --muted:#7A8296;
+    --violet:#B983FF;
+    --ember:#FF7A45;
+    --teal:#2DD4BF;
+    --rose:#FB6F92;
+    --gold:#FFD166;
+  }
+  *{box-sizing:border-box;}
+  html,body{
+    margin:0; padding:0; height:100%;
+    background:
+      radial-gradient(1200px 600px at 50% -10%, #1a1f2e 0%, var(--bg-deep) 55%),
+      var(--bg-deep);
+    color:var(--ink);
+    font-family:'Sora', system-ui, sans-serif;
+    display:flex; align-items:center; justify-content:center;
+    overflow:hidden;
+  }
+  .wrap{
+    display:flex; flex-direction:column; align-items:center;
+    gap:14px; padding:20px;
+    user-select:none;
+  }
+  .title{
+    font-family:'Space Grotesk', sans-serif;
+    font-weight:700;
+    font-size:clamp(28px, 6vw, 40px);
+    letter-spacing:4px;
+    text-transform:uppercase;
+    background:linear-gradient(90deg, var(--violet), var(--teal) 50%, var(--gold));
+    -webkit-background-clip:text;
+    background-clip:text;
+    color:transparent;
+    text-shadow:0 0 40px rgba(185,131,255,0.25);
+    margin:0;
+  }
+  .subtitle{
+    color:var(--muted);
+    font-size:13px;
+    letter-spacing:1px;
+    margin-top:-10px;
+  }
+  .hud{
+    display:flex; gap:10px; width:100%;
+    justify-content:center;
+  }
+  .stat{
+    background:var(--bg-panel);
+    border:1px solid var(--line);
+    border-radius:12px;
+    padding:8px 18px;
+    min-width:92px;
+    text-align:center;
+  }
+  .stat .label{
+    font-size:10px; letter-spacing:1.5px; text-transform:uppercase;
+    color:var(--muted);
+  }
+  .stat .value{
+    font-family:'Space Grotesk', sans-serif;
+    font-size:22px; font-weight:700;
+    color:var(--ink);
+    transition:transform .15s ease;
+  }
+  .stat.combo .value{ color:var(--gold); }
+  .stat.pulse .value{ transform:scale(1.25); }
+  #board{
+    display:block;
+    border-radius:16px;
+    background:linear-gradient(160deg, #151a26, #0d1017);
+    border:1px solid var(--line);
+    box-shadow:
+      0 20px 60px rgba(0,0,0,0.55),
+      inset 0 0 40px rgba(0,0,0,0.4);
+    cursor:pointer;
+    touch-action:none;
+  }
+  .footer{
+    display:flex; align-items:center; gap:14px;
+    color:var(--muted); font-size:12px;
+    text-align:center;
+  }
+  button{
+    font-family:'Space Grotesk', sans-serif;
+    background:transparent;
+    border:1px solid var(--line);
+    color:var(--ink);
+    padding:8px 16px;
+    border-radius:10px;
+    cursor:pointer;
+    font-size:13px;
+    letter-spacing:0.5px;
+    transition:border-color .15s ease, background .15s ease;
+  }
+  button:hover{
+    border-color:var(--violet);
+    background:rgba(185,131,255,0.08);
+  }
+  .msg{
+    position:fixed;
+    top:50%; left:50%;
+    transform:translate(-50%,-50%);
+    font-family:'Space Grotesk', sans-serif;
+    font-size:15px;
+    color:var(--gold);
+    letter-spacing:1px;
+    opacity:0;
+    pointer-events:none;
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1 class="title">Cascade</h1>
+  <div class="subtitle">tap a cluster of matching crystals to shatter it</div>
+
+  <div class="hud">
+    <div class="stat" id="stat-score">
+      <div class="label">Score</div>
+      <div class="value" id="score-val">0</div>
+    </div>
+    <div class="stat combo" id="stat-combo">
+      <div class="label">Combo</div>
+      <div class="value" id="combo-val">x1</div>
+    </div>
+    <div class="stat" id="stat-best">
+      <div class="label">Best Chain</div>
+      <div class="value" id="best-val">0</div>
+    </div>
+  </div>
+
+  <canvas id="board"></canvas>
+
+  <div class="footer">
+    <span>Bigger clusters + fast chains = more points.</span>
+    <button id="reset-btn">Restart</button>
+  </div>
+</div>
+
+<script>
+(function(){
+  const COLS = 7, ROWS = 9, CELL = 52, PAD = 8;
+  const canvas = document.getElementById('board');
+  const ctx = canvas.getContext('2d');
+  canvas.width = COLS * CELL + PAD * 2;
+  canvas.height = ROWS * CELL + PAD * 2;
+
+  const GEMS = [
+    { base:'#B983FF', glow:'#E4D1FF' }, // violet
+    { base:'#FF7A45', glow:'#FFD1B8' }, // ember
+    { base:'#2DD4BF', glow:'#B5FFF3' }, // teal
+    { base:'#FB6F92', glow:'#FFD1DE' }, // rose
+    { base:'#FFD166', glow:'#FFF0C2' }, // gold
+  ];
+
+  const scoreEl = document.getElementById('score-val');
+  const comboEl = document.getElementById('combo-val');
+  const comboStat = document.getElementById('stat-combo');
+  const bestEl = document.getElementById('best-val');
+  const resetBtn = document.getElementById('reset-btn');
+
+  let grid = []; // grid[col][row] = tile | null
+  let particles = [];
+  let floaters = []; // floating combo/score text
+  let state = 'idle'; // idle | falling
+  let score = 0;
+  let combo = 1;
+  let bestChain = 0;
+  let lastMatchTime = -99999;
+  const COMBO_WINDOW = 1600;
+  let shake = 0;
+  let shakeSeed = Math.random() * 1000;
+  let invalidPulse = null; // {col,row,t}
+
+  function rand(n){ return Math.floor(Math.random() * n); }
+
+  function makeTile(col, row, spawnRowsAbove){
+    return {
+      color: rand(GEMS.length),
+      yPix: (row - spawnRowsAbove) * CELL,
+      targetRow: row,
+    };
+  }
+
+  function initGrid(){
+    grid = [];
+    for (let c = 0; c < COLS; c++){
+      const column = [];
+      for (let r = 0; r < ROWS; r++){
+        column.push(makeTile(c, r, ROWS)); // all start above and fall in
+      }
+      grid.push(column);
+    }
+    state = 'falling';
+  }
+
+  function cellCenter(col, row){
+    return {
+      x: PAD + col * CELL + CELL/2,
+      y: PAD + row * CELL + CELL/2,
+    };
+  }
+
+  function getGroup(col, row){
+    const tile = grid[col][row];
+    if (!tile) return [];
+    const color = tile.color;
+    const seen = new Set();
+    const stack = [[col,row]];
+    const group = [];
+    while (stack.length){
+      const [c,r] = stack.pop();
+      const key = c+','+r;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      if (c<0||c>=COLS||r<0||r>=ROWS) continue;
+      const t = grid[c][r];
+      if (!t || t.color !== color) continue;
+      group.push([c,r]);
+      stack.push([c+1,r],[c-1,r],[c,r+1],[c,r-1]);
+    }
+    return group;
+  }
+
+  function spawnParticles(x, y, color, count){
+    for (let i=0;i<count;i++){
+      const angle = Math.random()*Math.PI*2;
+      const speed = 1.5 + Math.random()*3.5;
+      particles.push({
+        x, y,
+        vx: Math.cos(angle)*speed,
+        vy: Math.sin(angle)*speed - 1.5,
+        life: 1,
+        decay: 0.018 + Math.random()*0.02,
+        size: 2 + Math.random()*3,
+        color,
+      });
+    }
+  }
+
+  function triggerShake(mag){
+    shake = Math.min(shake + mag, 18);
+  }
+
+  function processMatch(col, row){
+    const group = getGroup(col, row);
+    if (group.length < 2){
+      invalidPulse = { col, row, t: 0 };
+      return;
+    }
+
+    const now = performance.now();
+    if (now - lastMatchTime < COMBO_WINDOW){
+      combo++;
+    } else {
+      combo = 1;
+    }
+    lastMatchTime = now;
+    bestChain = Math.max(bestChain, combo);
+
+    const gain = group.length * group.length * 10 * combo;
+    score += gain;
+    scoreEl.textContent = score;
+    bestEl.textContent = bestChain;
+    comboEl.textContent = 'x' + combo;
+    comboStat.classList.add('pulse');
+    setTimeout(()=>comboStat.classList.remove('pulse'), 160);
+
+    // particles + centroid for floating text
+    let cx=0, cy=0;
+    const colorObj = GEMS[grid[col][row].color];
+    for (const [c,r] of group){
+      const p = cellCenter(c,r);
+      cx += p.x; cy += p.y;
+      spawnParticles(p.x, p.y, colorObj, 6 + Math.min(group.length,10));
+    }
+    cx /= group.length; cy /= group.length;
+
+    floaters.push({
+      x: cx, y: cy,
+      text: '+' + gain + (combo > 1 ? '  x' + combo : ''),
+      life: 1,
+      vy: -0.6,
+    });
+
+    if (group.length >= 6) triggerShake(6 + group.length*0.6);
+
+    // remove tiles
+    for (const [c,r] of group){
+      grid[c][r] = null;
+    }
+
+    // compact columns + spawn new tiles
+    for (let c = 0; c < COLS; c++){
+      const stack = [];
+      for (let r = 0; r < ROWS; r++){
+        if (grid[c][r]) stack.push(grid[c][r]);
+      }
+      const missing = ROWS - stack.length;
+      const newCol = new Array(ROWS).fill(null);
+      for (let i = 0; i < stack.length; i++){
+        const newRow = missing + i;
+        stack[i].targetRow = newRow;
+        newCol[newRow] = stack[i];
+      }
+      for (let i = 0; i < missing; i++){
+        const newRow = i;
+        const tile = makeTile(c, newRow, missing - i + 1);
+        newCol[newRow] = tile;
+      }
+      grid[c] = newCol;
+    }
+
+    state = 'falling';
+  }
+
+  function hasMoves(){
+    for (let c = 0; c < COLS; c++){
+      for (let r = 0; r < ROWS; r++){
+        const t = grid[c][r];
+        if (!t) continue;
+        if (c+1 < COLS && grid[c+1][r] && grid[c+1][r].color === t.color) return true;
+        if (r+1 < ROWS && grid[c][r+1] && grid[c][r+1].color === t.color) return true;
+      }
+    }
+    return false;
+  }
+
+  function shuffleBoard(){
+    for (let attempt = 0; attempt < 30; attempt++){
+      for (let c = 0; c < COLS; c++){
+        for (let r = 0; r < ROWS; r++){
+          if (grid[c][r]) grid[c][r].color = rand(GEMS.length);
+        }
+      }
+      if (hasMoves()) return;
+    }
+  }
+
+  canvas.addEventListener('click', (e) => {
+    if (state !== 'idle') return;
+    const rect = canvas.getBoundingClientRect();
+    const scaleX = canvas.width / rect.width;
+    const scaleY = canvas.height / rect.height;
+    const x = (e.clientX - rect.left) * scaleX;
+    const y = (e.clientY - rect.top) * scaleY;
+    const col = Math.floor((x - PAD) / CELL);
+    const row = Math.floor((y - PAD) / CELL);
+    if (col < 0 || col >= COLS || row < 0 || row >= ROWS) return;
+    processMatch(col, row);
+  });
+
+  resetBtn.addEventListener('click', () => {
+    score = 0; combo = 1; bestChain = 0; lastMatchTime = -99999;
+    particles = []; floaters = [];
+    scoreEl.textContent = '0';
+    comboEl.textContent = 'x1';
+    bestEl.textContent = '0';
+    initGrid();
+  });
+
+  function drawGem(x, y, size, color, alpha){
+    ctx.save();
+    ctx.globalAlpha = alpha;
+    ctx.shadowColor = color.base;
+    ctx.shadowBlur = 14;
+    const r = size * 0.28;
+    const half = size/2;
+    ctx.beginPath();
+    ctx.moveTo(x-half+r, y-half);
+    ctx.lineTo(x+half-r, y-half);
+    ctx.quadraticCurveTo(x+half, y-half, x+half, y-half+r);
+    ctx.lineTo(x+half, y+half-r);
+    ctx.quadraticCurveTo(x+half, y+half, x+half-r, y+half);
+    ctx.lineTo(x-half+r, y+half);
+    ctx.quadraticCurveTo(x-half, y+half, x-half, y+half-r);
+    ctx.lineTo(x-half, y-half+r);
+    ctx.quadraticCurveTo(x-half, y-half, x-half+r, y-half);
+    ctx.closePath();
+    const grad = ctx.createLinearGradient(x-half, y-half, x+half, y+half);
+    grad.addColorStop(0, color.glow);
+    grad.addColorStop(1, color.base);
+    ctx.fillStyle = grad;
+    ctx.fill();
+    ctx.shadowBlur = 0;
+    ctx.globalAlpha = alpha * 0.5;
+    ctx.beginPath();
+    ctx.ellipse(x-size*0.16, y-size*0.18, size*0.14, size*0.08, -0.5, 0, Math.PI*2);
+    ctx.fillStyle = '#ffffff';
+    ctx.fill();
+    ctx.restore();
+  }
+
+  function tick(){
+    // update falling
+    if (state === 'falling'){
+      let allSettled = true;
+      for (let c = 0; c < COLS; c++){
+        for (let r = 0; r < ROWS; r++){
+          const t = grid[c][r];
+          if (!t) continue;
+          const targetY = t.targetRow * CELL;
+          const diff = targetY - t.yPix;
+          if (Math.abs(diff) > 0.5){
+            t.yPix += diff * 0.22 + Math.sign(diff) * 0.6;
+            allSettled = false;
+          } else {
+            t.yPix = targetY;
+          }
+        }
+      }
+      if (allSettled){
+        state = 'idle';
+        if (!hasMoves()) shuffleBoard();
+      }
+    }
+
+    // update particles
+    for (let i = particles.length-1; i >= 0; i--){
+      const p = particles[i];
+      p.x += p.vx; p.y += p.vy;
+      p.vy += 0.09;
+      p.life -= p.decay;
+      if (p.life <= 0) particles.splice(i,1);
+    }
+
+    // update floaters
+    for (let i = floaters.length-1; i >= 0; i--){
+      const f = floaters[i];
+      f.y += f.vy;
+      f.life -= 0.014;
+      if (f.life <= 0) floaters.splice(i,1);
+    }
+
+    // shake decay
+    shake *= 0.88;
+    if (shake < 0.05) shake = 0;
+
+    render();
+    requestAnimationFrame(tick);
+  }
+
+  function render(){
+    ctx.clearRect(0,0,canvas.width,canvas.height);
+    ctx.save();
+    if (shake > 0){
+      const dx = (Math.random()-0.5) * shake;
+      const dy = (Math.random()-0.5) * shake;
+      ctx.translate(dx, dy);
+    }
+
+    // subtle grid lines
+    ctx.strokeStyle = 'rgba(255,255,255,0.03)';
+    ctx.lineWidth = 1;
+    for (let c=1; c<COLS; c++){
+      ctx.beginPath();
+      ctx.moveTo(PAD + c*CELL, PAD);
+      ctx.lineTo(PAD + c*CELL, PAD + ROWS*CELL);
+      ctx.stroke();
+    }
+    for (let r=1; r<ROWS; r++){
+      ctx.beginPath();
+      ctx.moveTo(PAD, PAD + r*CELL);
+      ctx.lineTo(PAD + COLS*CELL, PAD + r*CELL);
+      ctx.stroke();
+    }
+
+    // gems
+    const gemSize = CELL - 12;
+    for (let c = 0; c < COLS; c++){
+      for (let r = 0; r < ROWS; r++){
+        const t = grid[c][r];
+        if (!t) continue;
+        const x = PAD + c*CELL + CELL/2;
+        const y = PAD + t.yPix + CELL/2;
+        let alpha = 1;
+        let size = gemSize;
+        if (invalidPulse && invalidPulse.col === c && invalidPulse.row === r){
+          size = gemSize * (1 - 0.08*Math.sin(invalidPulse.t*20));
+        }
+        drawGem(x, y, size, GEMS[t.color], alpha);
+      }
+    }
+
+    if (invalidPulse){
+      invalidPulse.t += 0.05;
+      if (invalidPulse.t > 1) invalidPulse = null;
+    }
+
+    // particles
+    for (const p of particles){
+      ctx.globalAlpha = Math.max(p.life, 0);
+      ctx.fillStyle = p.color.glow;
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, p.size, 0, Math.PI*2);
+      ctx.fill();
+    }
+    ctx.globalAlpha = 1;
+
+    // floaters
+    ctx.textAlign = 'center';
+    ctx.font = "700 15px 'Space Grotesk', sans-serif";
+    for (const f of floaters){
+      ctx.globalAlpha = Math.max(f.life, 0);
+      ctx.fillStyle = '#FFD166';
+      ctx.shadowColor = '#FFD166';
+      ctx.shadowBlur = 8;
+      ctx.fillText(f.text, f.x, f.y);
+    }
+    ctx.shadowBlur = 0;
+    ctx.globalAlpha = 1;
+
+    ctx.restore();
+  }
+
+  initGrid();
+  requestAnimationFrame(tick);
+})();
+</script>
+</body>
+</html>
